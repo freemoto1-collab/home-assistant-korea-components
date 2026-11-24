@@ -1,4 +1,5 @@
 import json
+from datetime import date, datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
 from curl_cffi import AsyncSession, CurlError
@@ -6,6 +7,48 @@ from curl_cffi import AsyncSession, CurlError
 from ..const import LOGGER
 from ..utils import RSAKey
 from .exceptions import KepcoAuthError
+
+KST = timezone(timedelta(hours=9))
+
+
+def _to_float(value) -> float:
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def parse_hourly_details(day: date, payload) -> list[dict]:
+    """real_day/usage.do 응답을 시간별 목록으로 변환한다.
+
+    MR_HH=h(1~24)는 (h-1)시~h시 구간이므로 start는 해당 구간의 시작 시각(KST)이다.
+    한전은 아직 집계되지 않은 시간도 0.000으로 내려주므로, 사용량/잉여량이
+    모두 0이 아닌 마지막 시간까지만 반환한다(그 뒤는 미집계로 간주).
+    """
+    details = (payload or {}).get("details") or []
+    midnight = datetime(day.year, day.month, day.day, tzinfo=KST)
+    points = []
+    for item in details:
+        hour_raw = item.get("MR_HH") or str(item.get("MR_HHMI", ""))[:2]
+        try:
+            hour = int(hour_raw)
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= hour <= 24:
+            continue
+        points.append(
+            {
+                "start": midnight + timedelta(hours=hour - 1),
+                "usage": _to_float(item.get("F_AP_QT")),
+                "export": _to_float(item.get("F_AP_QT_REV")),
+            }
+        )
+    points.sort(key=lambda point: point["start"])
+    last = -1
+    for index, point in enumerate(points):
+        if point["usage"] > 0 or point["export"] > 0:
+            last = index
+    return points[: last + 1]
 
 
 class KepcoApiClient:
@@ -138,3 +181,19 @@ class KepcoApiClient:
     async def async_get_usage_info(self):
         url = "https://pp.kepco.co.kr:8030/low/main/usage_info.do"
         return await self._request("POST", url, json={"tou": "N"})
+
+    async def async_get_hourly(self, day: date) -> list[dict]:
+        """하루치 시간별 사용량(수전)과 잉여량(역송)을 함께 조회한다."""
+        url = "https://pp.kepco.co.kr:8030/low/real/real_day/usage.do"
+        payload = await self._request(
+            "POST", url, json={"SEARCH_DT": day.strftime("%Y-%m-%d")}
+        )
+        return parse_hourly_details(day, payload)
+
+    async def async_get_hourly_usage(self, day: date) -> list[tuple[datetime, float]]:
+        """시간별 사용량(kWh): [(구간 시작 시각, 값)]"""
+        return [(p["start"], p["usage"]) for p in await self.async_get_hourly(day)]
+
+    async def async_get_hourly_export(self, day: date) -> list[tuple[datetime, float]]:
+        """시간별 잉여량(태양광 역송, kWh): [(구간 시작 시각, 값)]"""
+        return [(p["start"], p["export"]) for p in await self.async_get_hourly(day)]

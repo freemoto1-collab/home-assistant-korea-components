@@ -1,13 +1,19 @@
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
 import aiohttp
 from curl_cffi import AsyncSession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from .api import KepcoApiClient
+from .api import KST, KepcoApiClient
 from .exceptions import KepcoAuthError
 from ..const import DOMAIN, LOGGER
+from .statistics import async_import_hourly
+
+HOURLY_SYNC_INTERVAL = 1800  # 초
+HOURLY_DAYS_INITIAL = 7
+HOURLY_DAYS_REFRESH = 3
 
 
 class KepcoDevice:
@@ -33,6 +39,7 @@ class KepcoDevice:
         self._unique_id = f"kepco_{username}"
         self._available = True
         self.data = {}  # 초기화 추가
+        self._last_hourly_sync: float | None = None
 
     @property
     def unique_id(self) -> str:
@@ -63,6 +70,7 @@ class KepcoDevice:
             }
             self._available = True
             self._last_update_success = datetime.now()
+            await self.async_sync_hourly_statistics()
             LOGGER.debug(f"KEPCO data updated successfully for {self.username}")
         except KepcoAuthError as err:
             self._available = False
@@ -74,6 +82,35 @@ class KepcoDevice:
             self._available = False
             LOGGER.error(f"Error updating KEPCO data for {self.username}: {err}")
             raise UpdateFailed(f"Error communicating with KEPCO API: {err}")
+
+    async def async_sync_hourly_statistics(self, force: bool = False) -> None:
+        """시간별 사용량/잉여량을 해당 시각 통계로 기록(최근 며칠 재조회로 백필).
+
+        실패해도 기존 센서 갱신에는 영향을 주지 않는다.
+        """
+        now = time.monotonic()
+        if (
+            not force
+            and self._last_hourly_sync is not None
+            and now - self._last_hourly_sync < HOURLY_SYNC_INTERVAL
+        ):
+            return
+        days = HOURLY_DAYS_REFRESH if self._last_hourly_sync else HOURLY_DAYS_INITIAL
+        try:
+            today = datetime.now(KST).date()
+            points = []
+            for offset in range(days - 1, -1, -1):
+                points.extend(
+                    await self.api_client.async_get_hourly(
+                        today - timedelta(days=offset)
+                    )
+                )
+            await async_import_hourly(self.hass, self._unique_id, self._name, points)
+            self._last_hourly_sync = now
+        except KepcoAuthError:
+            raise
+        except Exception as err:
+            LOGGER.warning(f"KEPCO hourly statistics sync failed: {err}")
 
     def get_current_usage(self):
         """현재 사용량 조회"""

@@ -6,6 +6,9 @@
     "@plplaaa2",
     "@jhkwon19"
   ],
+  "after_dependencies": [
+    "recorder"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/hwajin-me/home-assistant-korea-components/blob/main/README.md",
   "iot_class": "cloud_polling",
