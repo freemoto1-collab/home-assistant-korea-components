@@ -44,6 +44,31 @@ cp -a /config/backup_kepco/<날짜>/korea_incubator /config/custom_components/
 (Samba는 백업 폴더를 같은 위치로 되돌림) 후 HA 재시작.
 이미 기록된 `..._hourly_*` 통계는 남습니다. 지우려면 개발자 도구 → 통계에서 해당 항목을 삭제하세요.
 
+## Docker 설치(HA Container)용
+설정 폴더(`config`)가 호스트 디렉터리이고 파일 소유자가 root/컨테이너 사용자라 호스트에서 직접 복사하면 sudo가 필요할 수 있습니다. 아래는 `docker exec`/`docker cp`를 쓰므로 sudo 없이(docker 권한만 있으면) 됩니다. 컨테이너 이름이 `homeassistant`가 아니면 바꿔 쓰세요.
+
+> 주의: 명령 블록을 복사할 때 프롬프트 줄(`$`, `#`, `PS>` 등)은 복사하지 마세요. 명령어만 붙여넣습니다.
+
+백업(원본, 설치 전에 먼저):
+```sh
+mkdir -p ./backup/$(date +%Y%m%d)
+docker cp homeassistant:/config/custom_components/korea_incubator ./backup/$(date +%Y%m%d)/
+```
+
+수정본 설치(`<클론>`은 git clone한 저장소 경로):
+```sh
+docker exec homeassistant rm -rf /config/custom_components/korea_incubator
+docker cp <클론>/custom_components/korea_incubator homeassistant:/config/custom_components/
+docker restart homeassistant
+```
+
+복원(문제 시):
+```sh
+docker exec homeassistant rm -rf /config/custom_components/korea_incubator
+docker cp ./backup/<날짜>/korea_incubator homeassistant:/config/custom_components/
+docker restart homeassistant
+```
+
 ## 참고
 - 한전은 아직 집계 전인 시간도 0.000으로 내려주므로, 그날 값이 있는 마지막 시간까지만 기록합니다.
 - 한전 쪽 조회 실패는 기존 센서 갱신에 영향을 주지 않고 경고 로그만 남깁니다.

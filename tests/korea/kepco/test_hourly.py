@@ -161,3 +161,37 @@ async def test_device_sync_failure_does_not_break_update(device):
     device.api_client.async_get_usage_info.return_value = {}
     await device.async_update()
     assert device.available is True
+
+
+def test_mean_fields_uses_mean_type_none_when_supported():
+    from homeassistant.components.recorder.models import StatisticMeanType
+
+    assert stats._mean_fields() == {"mean_type": StatisticMeanType.NONE}
+
+
+def test_mean_fields_falls_back_to_has_mean_on_old_ha():
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "homeassistant.components.recorder.models" and fromlist and "StatisticMeanType" in fromlist:
+            raise ImportError("old HA")
+        return real_import(name, globals, locals, fromlist, level)
+
+    with patch("builtins.__import__", side_effect=fake):
+        assert stats._mean_fields() == {"has_mean": False}
+
+
+async def test_import_metadata_has_mean_type_none():
+    from homeassistant.components.recorder.models import StatisticMeanType
+
+    calls = []
+    points = [{"start": datetime(2026, 11, 24, 0, tzinfo=KST), "usage": 1.0, "export": 0.0}]
+    with patch.object(stats, "_base_sum", AsyncMock(return_value=0.0)), patch(
+        "homeassistant.components.recorder.statistics.async_add_external_statistics",
+        side_effect=lambda hass, meta, data: calls.append(meta),
+    ):
+        await stats.async_import_hourly(MagicMock(), "kepco_x", "한전", points)
+    assert all(m["mean_type"] == StatisticMeanType.NONE for m in calls)
+    assert all("has_mean" not in m for m in calls)

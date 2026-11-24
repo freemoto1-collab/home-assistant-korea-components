@@ -25,6 +25,15 @@ def build_rows(points: list[tuple[datetime, float]], base_sum: float) -> list[di
     return rows
 
 
+def _mean_fields() -> dict:
+    """mean_type을 지원하는 HA는 mean_type=NONE, 구버전은 has_mean=False."""
+    try:
+        from homeassistant.components.recorder.models import StatisticMeanType
+    except ImportError:
+        return {"has_mean": False}
+    return {"mean_type": StatisticMeanType.NONE}
+
+
 async def _base_sum(hass, stat_id: str, first_start: datetime) -> float:
     from homeassistant.components.recorder import get_instance
     from homeassistant.components.recorder.statistics import statistics_during_period
@@ -62,7 +71,7 @@ async def async_import_hourly(
         base = await _base_sum(hass, stat_id, first_start)
         rows = build_rows([(p["start"], p[kind]) for p in points], base)
         metadata = StatisticMetaData(
-            has_mean=False,
+            **_mean_fields(),
             has_sum=True,
             name=f"{name} {label}",
             source=DOMAIN,
