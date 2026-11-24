@@ -53,6 +53,7 @@ class KepcoDevice:
         password: str,
         session: aiohttp.ClientSession | AsyncSession,
         custno: str | None = None,
+        has_export: bool = False,
     ):
         self.hass = hass
         self.entry_id = entry_id
@@ -65,6 +66,9 @@ class KepcoDevice:
         )  # Set credentials for re-auth
 
         self.data = {}
+        # 잉여(역송) 설비가 있는 고객번호인지. 한 번 True가 되면 유지(저장은 호출 측).
+        self.has_export = bool(has_export)
+        self.on_export_detected = None
         self.custno = str(custno) if custno else None
         self.api_client.set_customer(self.custno)
         self._customer_count: int | None = None
@@ -116,6 +120,7 @@ class KepcoDevice:
                 }
                 self._available = True
                 self._last_update_success = datetime.now()
+                self._mark_export(usage_info=usage_info)
                 await self.async_sync_hourly_statistics()
             LOGGER.debug(f"KEPCO data updated successfully for {self.username}")
         except KepcoAuthError as err:
@@ -128,6 +133,18 @@ class KepcoDevice:
             self._available = False
             LOGGER.error(f"Error updating KEPCO data for {self.username}: {err}")
             raise UpdateFailed(f"Error communicating with KEPCO API: {err}")
+
+    def _mark_export(self, usage_info=None, points=None) -> None:
+        """잉여 보유 판단: 발전설비 구분(SESS_GENT_INST_CLCD)이 있거나 잉여량>0 이력."""
+        if self.has_export:
+            return
+        found = bool(isinstance(usage_info, dict) and usage_info.get("SESS_GENT_INST_CLCD"))
+        found = found or any((p.get("export") or 0) > 0 for p in points or [])
+        if not found:
+            return
+        self.has_export = True
+        if callable(self.on_export_detected):
+            self.on_export_detected()
 
     async def _async_refresh_customer_count(self) -> None:
         """계정의 고객번호 수를 한 번(이후 1시간마다) 확인해 표시 이름에 반영한다."""
@@ -184,13 +201,19 @@ class KepcoDevice:
                         )
                     )
                 today_points = [p for p in points if p["start"].date() == today]
+                self._mark_export(points=points)
                 self.data["hourly"] = summarize_hourly(today_points)
                 await async_import_hourly(
-                    self.hass, self._unique_id, self.display_name, points
+                    self.hass,
+                    self._unique_id,
+                    self.display_name,
+                    points,
+                    kinds=("usage", "export") if self.has_export else ("usage",),
                 )
                 self._last_hourly_sync = now
             else:
                 today_points = await self.api_client.async_get_hourly(today)
+                self._mark_export(points=today_points)
             self.data["hourly"] = summarize_hourly(today_points)
         except KepcoAuthError:
             raise

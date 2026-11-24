@@ -70,7 +70,11 @@ async def _base_sum(hass, stat_id: str, first_start: datetime) -> float:
 
 
 async def async_import_hourly(
-    hass, unique_id: str, name: str, points: list[dict]
+    hass,
+    unique_id: str,
+    name: str,
+    points: list[dict],
+    kinds: tuple[str, ...] = ("usage", "export"),
 ) -> None:
     """points: api.async_get_hourly 결과(여러 날 합친 것). 같은 시각은 덮어쓴다."""
     from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
@@ -81,7 +85,9 @@ async def async_import_hourly(
     if not points:
         return
     first_start = min(p["start"] for p in points)
-    for kind, label in (("usage", "시간별 사용량"), ("export", "시간별 잉여량")):
+    labels = {"usage": "시간별 사용량", "export": "시간별 잉여량"}
+    for kind in kinds:
+        label = labels[kind]
         stat_id = statistic_id(unique_id, kind)
         base = await _base_sum(hass, stat_id, first_start)
         rows = build_rows([(p["start"], p[kind]) for p in points], base)

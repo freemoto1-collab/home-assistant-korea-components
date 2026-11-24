@@ -112,12 +112,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data.get(CONF_PASSWORD),
             curl_cffi.AsyncSession(),
             custno=entry.data.get("custno"),
+            has_export=bool(entry.data.get("has_export", False)),
         )
         try:
             await device.api_client.async_login(
                 entry.data.get(CONF_USERNAME), entry.data.get(CONF_PASSWORD)
             )
             await device.async_update()
+            if device.has_export is True and not entry.data.get("has_export"):
+                hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, "has_export": True}
+                )
+
+            def _export_detected() -> None:
+                # 잉여가 처음 발생: 상태를 저장하고 재로드해 잉여량 센서를 만든다.
+                hass.config_entries.async_update_entry(
+                    entry, data={**entry.data, "has_export": True}
+                )
+                hass.config_entries.async_schedule_reload(entry.entry_id)
+
+            device.on_export_detected = _export_detected
             # 기존 항목 제목에 남아 있는 고객번호를 가린 이름으로 갱신한다.
             if getattr(entry, "title", None) != device.display_name:
                 hass.config_entries.async_update_entry(

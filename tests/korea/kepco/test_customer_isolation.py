@@ -107,8 +107,11 @@ async def test_two_devices_updating_concurrently_never_mix():
     dev_b = make_device(server, custno=B)
     imports = {}
 
-    async def fake_import(hass, uid, name, points):
+    kinds_used = {}
+
+    async def fake_import(hass, uid, name, points, kinds=("usage", "export")):
         imports[uid] = points
+        kinds_used[uid] = kinds
 
     with patch(
         "custom_components.korea_incubator.kepco.device.async_import_hourly",
@@ -128,6 +131,9 @@ async def test_two_devices_updating_concurrently_never_mix():
     # 시간별 통계: B는 잉여량 0, A는 0.5
     assert all(p["export"] == 0.0 for p in imports[dev_b.unique_id])
     assert any(p["export"] == 0.5 for p in imports[dev_a.unique_id])
+    # 잉여 없는 B는 잉여량 통계를 쓰지 않고, 있는 A는 쓴다
+    assert kinds_used[dev_b.unique_id] == ("usage",)
+    assert kinds_used[dev_a.unique_id] == ("usage", "export")
     assert dev_b.data["hourly"]["export"] == 0.0
     assert dev_b.data["hourly"]["today_export"] == 0.0
     assert dev_a.data["hourly"]["today_export"] == 0.5

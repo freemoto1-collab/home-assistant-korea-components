@@ -69,6 +69,17 @@ def _remove_reindexed_gasapp_entities(
 
 
 
+def _remove_registry_entities(hass: HomeAssistant, unique_ids: list[str]) -> None:
+    try:
+        registry = er.async_get(hass)
+    except KeyError:
+        return
+    for unique_id in unique_ids:
+        entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+        if entity_id:
+            registry.async_remove(entity_id)
+
+
 @reconcile_entities("sensor")
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -281,6 +292,8 @@ async def async_setup_entry(
             KepcoHourlySensor(
                 coordinator, device, "usage", "최근 집계 시간 사용량"
             ),
+        ]
+        export_sensors = [
             KepcoHourlySensor(
                 coordinator, device, "export", "최근 집계 시간 잉여량"
             ),
@@ -288,6 +301,13 @@ async def async_setup_entry(
                 coordinator, device, "today_export", "오늘 잉여량 누계"
             ),
         ]
+        if getattr(device, "has_export", False) is True:
+            entities += export_sensors
+        else:
+            # 잉여(역송) 이력이 없는 고객번호: 이미 만들어진 잉여량 센서 정리
+            _remove_registry_entities(
+                hass, [sensor.unique_id for sensor in export_sensors]
+            )
         async_add_entities(entities)
 
     elif service == "gasapp":
