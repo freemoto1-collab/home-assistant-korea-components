@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import datetime, timedelta
 
@@ -12,8 +13,19 @@ from ..const import DOMAIN, LOGGER
 from .statistics import async_import_hourly, summarize_hourly
 
 HOURLY_SYNC_INTERVAL = 1800  # 초
-HOURLY_DAYS_INITIAL = 7
+HOURLY_DAYS_INITIAL = 14
 HOURLY_DAYS_REFRESH = 3
+
+
+_ACCOUNT_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _account_lock(username: str) -> asyncio.Lock:
+    """같은 아이디의 항목들은 서버 세션 상태(고객번호 선택)를 공유할 수 있어 직렬화한다."""
+    lock = _ACCOUNT_LOCKS.get(username)
+    if lock is None:
+        lock = _ACCOUNT_LOCKS[username] = asyncio.Lock()
+    return lock
 
 
 def kepco_unique_id(username: str, custno: str | None = None) -> str:
@@ -94,16 +106,17 @@ class KepcoDevice:
     async def async_update(self):
         """Fetch data from KEPCO API."""
         try:
-            recent_usage = await self.api_client.async_get_recent_usage()
-            usage_info = await self.api_client.async_get_usage_info()
-            self.data = {
-                "recent_usage": recent_usage,
-                "usage_info": usage_info,
-            }
-            self._available = True
-            self._last_update_success = datetime.now()
-            await self._async_refresh_customer_count()
-            await self.async_sync_hourly_statistics()
+            async with _account_lock(self.username):
+                await self._async_refresh_customer_count()
+                recent_usage = await self.api_client.async_get_recent_usage()
+                usage_info = await self.api_client.async_get_usage_info()
+                self.data = {
+                    "recent_usage": recent_usage,
+                    "usage_info": usage_info,
+                }
+                self._available = True
+                self._last_update_success = datetime.now()
+                await self.async_sync_hourly_statistics()
             LOGGER.debug(f"KEPCO data updated successfully for {self.username}")
         except KepcoAuthError as err:
             self._available = False
@@ -130,6 +143,14 @@ class KepcoDevice:
             if isinstance(customers, list):
                 self._customer_count = len(customers)
                 self._customer_checked = now
+                # 고객번호를 따로 저장하지 않은 항목(기존 항목)은 로그인 아이디와 같은
+                # 고객번호를 자기 번호로 고정해, 다른 항목의 전환에 휩쓸리지 않게 한다.
+                if (
+                    self.custno is None
+                    and len(customers) > 1
+                    and any(c.get("custno") == self.username for c in customers)
+                ):
+                    self.api_client.set_customer(self.username)
         except KepcoAuthError:
             raise
         except Exception as err:
@@ -163,6 +184,7 @@ class KepcoDevice:
                         )
                     )
                 today_points = [p for p in points if p["start"].date() == today]
+                self.data["hourly"] = summarize_hourly(today_points)
                 await async_import_hourly(
                     self.hass, self._unique_id, self.display_name, points
                 )

@@ -7,7 +7,7 @@ from curl_cffi import AsyncSession, CurlError
 
 from ..const import LOGGER
 from ..utils import RSAKey
-from .exceptions import KepcoAuthError
+from .exceptions import KepcoAuthError, KepcoCustomerMismatchError
 
 KST = timezone(timedelta(hours=9))
 
@@ -236,19 +236,43 @@ class KepcoApiClient:
         return []
 
     async def _request(self, method, url, **kwargs):
-        for attempt in range(2):
+        """요청 후 응답의 고객번호(SESS_CUSTNO)가 선택한 번호와 같은지 검증한다.
+
+        전환 상태가 서버 쪽에서 다른 항목/브라우저 때문에 바뀌었을 수 있으므로,
+        다르면 다시 전환 후 재시도하고 그래도 다르면 데이터를 버린다.
+        """
+        relogged = False
+        reselected = 0
+        while True:
             response = await self._session.request(method, url, **kwargs)
             redirected_to_login = (
                 str(response.url).split("?", 1)[0].endswith(("/login", "/intro.do"))
             )
             if response.status_code in (401, 403) or redirected_to_login:
-                if attempt == 0 and await self.async_login(
+                if not relogged and await self.async_login(
                     self._username, self._password
                 ):
+                    relogged = True
                     continue
                 raise KepcoAuthError("KEPCO session expired; authentication failed")
             response.raise_for_status()
-            return json.loads(response.text)
+            payload = json.loads(response.text)
+            expected = self._custno
+            actual = payload.get("SESS_CUSTNO") if isinstance(payload, dict) else None
+            if not expected or actual is None or str(actual) == expected:
+                return payload
+            LOGGER.debug(
+                "KEPCO response for %s while %s expected; re-selecting",
+                mask_custno(actual),
+                mask_custno(expected),
+            )
+            if reselected < 2 and await self._select_customer(expected):
+                reselected += 1
+                continue
+            raise KepcoCustomerMismatchError(
+                f"KEPCO returned data for customer {mask_custno(actual)}, "
+                f"expected {mask_custno(expected)}; data discarded"
+            )
 
     async def async_get_recent_usage(self):
         url = "https://pp.kepco.co.kr:8030/low/main/recent_usage.do"
