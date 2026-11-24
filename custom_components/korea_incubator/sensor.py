@@ -25,6 +25,7 @@ from .gasapp.device import GasAppDevice
 from .gasapp.format import parse_charge_amount
 from .goodsflow.device import GoodsFlowDevice
 from .kakaomap.device import KakaoMapDevice
+from .kepco.api import mask_custno
 from .kepco.device import KepcoDevice
 from .safety_alert.device import SafetyAlertDevice
 from .utils import get_value_from_path, parse_date_value
@@ -154,6 +155,7 @@ async def async_setup_entry(
                 None,
                 None,
                 None,
+                value_transform=mask_custno,
             ),
             KoreaSensor(
                 coordinator,
@@ -274,6 +276,16 @@ async def async_setup_entry(
                 SensorDeviceClass.ENERGY,
                 ENERGY_KILO_WATT_HOUR,
                 SensorStateClass.TOTAL,
+            ),
+            # 시간별 조회 기반(한전 표의 'N시' 구간 값)
+            KepcoHourlySensor(
+                coordinator, device, "usage", "최근 집계 시간 사용량"
+            ),
+            KepcoHourlySensor(
+                coordinator, device, "export", "최근 집계 시간 잉여량"
+            ),
+            KepcoHourlySensor(
+                coordinator, device, "today_export", "오늘 잉여량 누계"
             ),
         ]
         async_add_entities(entities)
@@ -1260,3 +1272,27 @@ class KoreaSensor(CoordinatorEntity, SensorEntity):
                             return None
 
         return raw_value
+
+
+class KepcoHourlySensor(KoreaSensor):
+    """시간별 조회로 얻은 값. 집계 구간(시작/종료)을 속성으로 제공한다."""
+
+    def __init__(self, coordinator, device, key: str, name: str) -> None:
+        super().__init__(
+            coordinator,
+            device,
+            "hourly",
+            key,
+            name,
+            SensorDeviceClass.ENERGY,
+            ENERGY_KILO_WATT_HOUR,
+            None,
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        hourly = (self.coordinator.data or {}).get("hourly") or {}
+        return {
+            "집계 구간 시작": hourly.get("start"),
+            "집계 구간 종료": hourly.get("end"),
+        }

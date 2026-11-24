@@ -34,11 +34,11 @@ class TestKepcoDeviceMock:
     def test_device_properties(self, kepco_device):
         """Test device basic properties."""
         assert kepco_device.unique_id == "kepco_test_user"
-        assert kepco_device._name == "한전 (test_user)"
+        assert kepco_device._name == "한전"
         assert kepco_device.available is True
 
         device_info = kepco_device.device_info
-        assert device_info["name"] == "한전 (test_user)"
+        assert device_info["name"] == "한전"
         assert device_info["manufacturer"] == "한국전력공사"
         assert device_info["model"] == "KEPCO"
 

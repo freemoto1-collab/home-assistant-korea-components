@@ -4,7 +4,9 @@
       "medical_facility": {
         "title": "의료기관 선택",
         "description": "설정을 변경할 의료기관을 선택하세요.",
-        "data": {"facility": "의료기관 선택"}
+        "data": {
+          "facility": "의료기관 선택"
+        }
       },
       "user": {
         "title": "서비스 선택",
@@ -532,6 +534,16 @@
         "data_description": {
           "keep_items": "선택을 해제한 항목은 제거됩니다. 모두 해제하여 새로 구성할 수도 있습니다."
         }
+      },
+      "kepco_customer": {
+        "title": "한전 고객번호 선택",
+        "description": "이 계정에는 고객번호가 여러 개 있습니다. 추가할 고객번호를 선택하세요(다른 번호는 통합 구성요소를 한 번 더 추가하세요).",
+        "data": {
+          "custno": "고객번호"
+        },
+        "data_description": {
+          "custno": "추가할 고객번호입니다(뒤 4자리만 표시)."
+        }
       }
     },
     "error": {
@@ -589,7 +601,9 @@
       "medical_facility_options": {
         "title": "의료기관 선택",
         "description": "설정을 변경할 의료기관을 선택하세요.",
-        "data": {"facility": "의료기관 선택"}
+        "data": {
+          "facility": "의료기관 선택"
+        }
       },
       "init": {
         "title": "옵션",

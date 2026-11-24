@@ -111,12 +111,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             entry.data.get(CONF_USERNAME),
             entry.data.get(CONF_PASSWORD),
             curl_cffi.AsyncSession(),
+            custno=entry.data.get("custno"),
         )
         try:
             await device.api_client.async_login(
                 entry.data.get(CONF_USERNAME), entry.data.get(CONF_PASSWORD)
             )
             await device.async_update()
+            # 기존 항목 제목에 남아 있는 고객번호를 가린 이름으로 갱신한다.
+            if getattr(entry, "title", None) != device.display_name:
+                hass.config_entries.async_update_entry(
+                    entry, title=device.display_name
+                )
         except KepcoAuthError as err:
             LOGGER.error(f"Authentication failed during setup for KEPCO: {err}")
             await device.async_close_session()

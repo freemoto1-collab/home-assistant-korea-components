@@ -147,10 +147,10 @@ async def test_device_sync_backfills_and_throttles(device):
     ) as imp:
         await device.async_sync_hourly_statistics()
         assert device.api_client.async_get_hourly.await_count == 7
-        await device.async_sync_hourly_statistics()  # 30분 내 재호출은 생략
-        assert device.api_client.async_get_hourly.await_count == 7
+        await device.async_sync_hourly_statistics()  # 30분 내에는 오늘만 조회
+        assert device.api_client.async_get_hourly.await_count == 8
         await device.async_sync_hourly_statistics(force=True)
-        assert device.api_client.async_get_hourly.await_count == 10
+        assert device.api_client.async_get_hourly.await_count == 11
     assert imp.await_count == 2
     assert imp.await_args.args[1] == "kepco_test_user"
 

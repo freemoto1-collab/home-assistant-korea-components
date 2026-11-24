@@ -165,6 +165,8 @@ class ServiceReconfigureFlow:
             if service == "cj_one_delivery":
                 identity = "".join(char for char in identity if char.isdigit())
             expected = f"{service}_{identity}" if identity else entry.unique_id
+            if service == "kepco" and entry.data.get("custno"):
+                expected = entry.unique_id
             if expected is not None and expected != self.unique_id:
                 raise AbortFlow("reconfigure_account_mismatch")
 

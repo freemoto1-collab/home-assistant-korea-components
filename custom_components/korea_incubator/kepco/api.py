@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from bs4 import BeautifulSoup
@@ -51,12 +52,41 @@ def parse_hourly_details(day: date, payload) -> list[dict]:
     return points[: last + 1]
 
 
+_CUSTOMER_RE = re.compile(
+    r'CUSTNO\s*:\s*"(\d+)"[\s\S]*?METER_ID\s*:\s*"(\d+)"',
+)
+
+
+def parse_customers(html: str) -> list[dict]:
+    """customchoose.do HTML의 chooseArray에서 고객번호별 계기번호 목록을 만든다."""
+    customers: dict[str, list[str]] = {}
+    for custno, meter_id in _CUSTOMER_RE.findall(html or ""):
+        meters = customers.setdefault(custno, [])
+        if meter_id not in meters:
+            meters.append(meter_id)
+    return [{"custno": c, "meterids": m} for c, m in customers.items()]
+
+
+def mask_custno(custno, visible: int = 4) -> str:
+    """고객번호 앞부분을 *로 가리고 뒤 visible자리만 남긴다."""
+    text = str(custno or "")
+    if len(text) <= visible:
+        return text
+    return "*" * (len(text) - visible) + text[-visible:]
+
+
 class KepcoApiClient:
     def __init__(self, session: AsyncSession):
         self._session = session
         self._username = None
         self._password = None
         self.last_error: str | None = None
+        self._custno: str | None = None
+        self._customers: list[dict] | None = None
+
+    def set_customer(self, custno: str | None):
+        """이 클라이언트가 조회할 고객번호(None이면 로그인 시 기본 고객번호)."""
+        self._custno = str(custno) if custno else None
 
     def set_credentials(self, username, password):
         self._username = username
@@ -150,6 +180,8 @@ class KepcoApiClient:
             )
             LOGGER.debug(f"Login response status: {response.status_code}")
             if response.status_code == 200 and "confirmInfo.do" in str(response.url):
+                if self._custno and not await self._select_customer(self._custno):
+                    return False
                 return True
             self.last_error = f"HTTP {response.status_code}: login rejected"
             LOGGER.warning("KEPCO %s", self.last_error)
@@ -158,6 +190,50 @@ class KepcoApiClient:
             self.last_error = f"Login request failed ({type(e).__name__})"
             LOGGER.warning("KEPCO %s", self.last_error)
             return False
+
+    async def _select_customer(self, custno: str) -> bool:
+        """서버 세션의 고객번호를 전환한다(세션별로 저장되므로 로그인마다 필요)."""
+        try:
+            page = await self._session.get(
+                "https://pp.kepco.co.kr:8030/common/customchoose.do"
+            )
+            customers = parse_customers(page.text)
+            self._customers = customers
+            match = next((c for c in customers if c["custno"] == custno), None)
+            if match is None:
+                self.last_error = "Selected customer number not found in account"
+                LOGGER.warning("KEPCO %s", self.last_error)
+                return False
+            result = await self._session.post(
+                "https://pp.kepco.co.kr:8030/common/customchoosechange.do",
+                json={"custno": custno, "meterids": ",".join(match["meterids"])},
+            )
+            if result.status_code != 200:
+                self.last_error = f"HTTP {result.status_code}: customer switch failed"
+                LOGGER.warning("KEPCO %s", self.last_error)
+                return False
+            return True
+        except (CurlError, OSError) as err:
+            self.last_error = f"Customer switch failed ({type(err).__name__})"
+            LOGGER.warning("KEPCO %s", self.last_error)
+            return False
+
+    async def async_get_customers(self) -> list[dict]:
+        """로그인된 계정의 고객번호 목록: [{"custno", "meterids"}]"""
+        for attempt in range(2):
+            response = await self._session.get(
+                "https://pp.kepco.co.kr:8030/common/customchoose.do"
+            )
+            if str(response.url).split("?", 1)[0].endswith(("/login", "/intro.do")):
+                if attempt == 0 and await self.async_login(
+                    self._username, self._password
+                ):
+                    continue
+                raise KepcoAuthError("KEPCO session expired; authentication failed")
+            response.raise_for_status()
+            self._customers = parse_customers(response.text)
+            return self._customers
+        return []
 
     async def _request(self, method, url, **kwargs):
         for attempt in range(2):

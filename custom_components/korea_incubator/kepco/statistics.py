@@ -14,6 +14,21 @@ def statistic_id(unique_id: str, kind: str) -> str:
     return f"{DOMAIN}:{slug}_hourly_{kind}"
 
 
+def summarize_hourly(points: list[dict]) -> dict:
+    """센서용 요약: 가장 최근 집계 시간 값과 오늘 누계."""
+    if not points:
+        return {}
+    last = max(points, key=lambda p: p["start"])
+    return {
+        "usage": last["usage"],
+        "export": last["export"],
+        "start": last["start"].isoformat(),
+        "end": (last["start"] + timedelta(hours=1)).isoformat(),
+        "today_usage": round(sum(p["usage"] for p in points), 6),
+        "today_export": round(sum(p["export"] for p in points), 6),
+    }
+
+
 def build_rows(points: list[tuple[datetime, float]], base_sum: float) -> list[dict]:
     """(시작 시각, 값) 목록을 누적 sum/state 행으로 만든다. 같은 시각은 마지막 값."""
     unique = dict(sorted(points, key=lambda p: p[0]))

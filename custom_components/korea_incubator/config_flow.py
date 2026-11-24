@@ -61,7 +61,8 @@ from .cj_one_delivery.exceptions import CannotConnect, InvalidAuth
 from .kakaomap.api import KakaoMapApiClient
 from .kakaomap.coordinates import convert_coordinates, validate_coordinates
 from .kakaomap.exceptions import KakaoMapConnectionError
-from .kepco.api import KepcoApiClient
+from .kepco.api import KepcoApiClient, mask_custno
+from .kepco.device import kepco_display_name, kepco_unique_id
 from .kepco.exceptions import KepcoAuthError
 from .safety_alert.api import SafetyAlertApiClient
 from .safety_alert.exceptions import SafetyAlertConnectionError
@@ -283,17 +284,28 @@ class KoreaConfigFlow(
                 client.set_credentials(
                     user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
                 )
+                reconfigure_entry = getattr(self, "_reconfigure_entry", None)
+                fixed_custno = (
+                    reconfigure_entry.data.get("custno") if reconfigure_entry else None
+                )
+                if fixed_custno:
+                    client.set_customer(fixed_custno)
                 try:
                     if await client.async_login(
                         user_input[CONF_USERNAME], user_input[CONF_PASSWORD]
                     ):
-                        unique_id = f"kepco_{user_input[CONF_USERNAME]}"
-                        await self.async_set_unique_id(unique_id)
-                        self._check_service_unique_id()
-
-                        user_input["service"] = "kepco"
-                        return self._finish_service_entry(
-                            title=f"한전 ({user_input[CONF_USERNAME]})", data=user_input
+                        customers = []
+                        if not fixed_custno:
+                            try:
+                                customers = await client.async_get_customers()
+                            except Exception as err:  # 목록 실패 시 기본 고객번호로 진행
+                                LOGGER.warning(f"KEPCO customer list failed: {err}")
+                        if len(customers) > 1:
+                            self._kepco_input = dict(user_input)
+                            self._kepco_customers = [c["custno"] for c in customers]
+                            return await self.async_step_kepco_customer()
+                        return await self._async_finish_kepco(
+                            user_input, fixed_custno, multiple=bool(fixed_custno)
                         )
                     else:
                         errors["base"] = "auth"
@@ -321,6 +333,33 @@ class KoreaConfigFlow(
             ),
             errors=errors,
             description_placeholders=error_info,
+        )
+
+    async def async_step_kepco_customer(
+        self, user_input: Optional[Dict[str, Any]] = None
+    ):
+        """계정에 고객번호가 여러 개일 때 하나를 선택한다(항목당 고객번호 1개)."""
+        if user_input is not None:
+            custno = user_input["custno"]
+            data = dict(self._kepco_input)
+            # 로그인 아이디와 같은 고객번호는 기존 항목과 같은 ID를 유지한다.
+            return await self._async_finish_kepco(data, custno, multiple=True)
+        options = {c: mask_custno(c) for c in self._kepco_customers}
+        return self.async_show_form(
+            step_id="kepco_customer",
+            data_schema=vol.Schema({vol.Required("custno"): vol.In(options)}),
+        )
+
+    async def _async_finish_kepco(self, data, custno, multiple):
+        username = data[CONF_USERNAME]
+        unique_id = kepco_unique_id(username, custno)
+        await self.async_set_unique_id(unique_id)
+        self._check_service_unique_id()
+        data = {**data, "service": "kepco"}
+        if custno:
+            data["custno"] = str(custno)
+        return self._finish_service_entry(
+            title=kepco_display_name(username, custno, multiple), data=data
         )
 
     async def async_step_gasapp(self, user_input: Optional[Dict[str, Any]] = None):

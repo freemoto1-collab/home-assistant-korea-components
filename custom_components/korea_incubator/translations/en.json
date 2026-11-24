@@ -4,7 +4,9 @@
       "medical_facility": {
         "title": "Select institution",
         "description": "Select the institution to edit.",
-        "data": {"facility": "Select institution"}
+        "data": {
+          "facility": "Select institution"
+        }
       },
       "user": {
         "title": "Select Service",
@@ -532,6 +534,16 @@
         "data_description": {
           "keep_items": "Unchecked items are removed. Clear all selections to rebuild the list."
         }
+      },
+      "kepco_customer": {
+        "title": "Select KEPCO customer number",
+        "description": "This account has several customer numbers. Pick the one to add (add the integration again for the others).",
+        "data": {
+          "custno": "Customer number"
+        },
+        "data_description": {
+          "custno": "This account has several customer numbers"
+        }
       }
     },
     "error": {
@@ -589,7 +601,9 @@
       "medical_facility_options": {
         "title": "Select institution",
         "description": "Select the institution to edit.",
-        "data": {"facility": "Select institution"}
+        "data": {
+          "facility": "Select institution"
+        }
       },
       "init": {
         "title": "Options",
